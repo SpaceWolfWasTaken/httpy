@@ -1,4 +1,5 @@
 import socket as s
+import re
 
 STATUS_200 = "HTTP/1.1 200 OK"
 SPLIT = "\r\n"
@@ -9,25 +10,32 @@ sock = s.socket()
 sock.bind(ADDRESS)
 sock.listen(5)
 
-#client_socket, client_addr = sock.accept()
-
-def empty():
-    data = '''
-    <html>
-    <head> <title> Empty </title> </head>
-    <body>
-    <h1> This is an empty HTML page </h1>
-    </body>
-    </html>
-    '''
+def resp(data=""):
     response = f'{STATUS_200}{SPLIT}Content-Length: {len(data)}{CONTENT_SPLIT}{data}'
     return response
 
-def respond(c:tuple[s.socket, tuple[str,int]]):
-    sock, addr = c
-    msg = sock.recv(1024).decode().split(SPLIT)
-    print(f"Received request from {addr}")
-    sock.sendall(empty().encode())
 
-respond(sock.accept())
-sock.close()
+def get_request_type(line:str) -> str:
+    x = re.split("/",line,1) #splits at the first /
+    request_type = x[0].strip()
+    return request_type
+
+def get_route(line:str) -> str:
+    req_type = get_request_type(line)
+    line = line.replace(req_type,"").replace("HTTP/1.1","").strip()
+    return line
+
+
+client_sock, client_addr = sock.accept()
+for i in range(3):
+    msg = client_sock.recv(1024).decode().split(SPLIT)
+    print(f"Received request from {client_addr}")
+    print(msg)
+    route = get_route(msg[0])
+    req_type = get_request_type(msg[0])
+    
+    if req_type=="GET":
+        print("GET request!")
+    elif req_type=="POST":
+        print("POST request!")
+    client_sock.sendall(resp().encode())
