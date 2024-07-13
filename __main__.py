@@ -1,18 +1,27 @@
 import socket as s
 import re
+import os
 
 STATUS_200 = "HTTP/1.1 200 OK"
 SPLIT = "\r\n"
 CONTENT_SPLIT = SPLIT + SPLIT
 ADDRESS = ("127.0.0.1",9989)
+static_files = 'files'
+index_file = 'files/index.html'
 
 sock = s.socket()
 sock.bind(ADDRESS)
 sock.listen(5)
 
-def resp(data=""):
-    response = f'{STATUS_200}{SPLIT}Content-Length: {len(data)}{CONTENT_SPLIT}{data}'
-    return response
+def resp(data:str | bytes=""):
+    if type(data) == str:
+        response = f'{STATUS_200}{SPLIT}Content-Length: {len(data)}{CONTENT_SPLIT}{data}'
+        return response.encode()
+    else:
+        #if data is bytes
+        response = f'{STATUS_200}{SPLIT}Content-Length: {len(data)}{CONTENT_SPLIT}'.encode()
+        response = response + data
+        return response
 
 
 def get_request_type(line:str) -> str:
@@ -33,13 +42,31 @@ for i in range(4):
     #print(msg)
     route = get_route(msg[0])
     req_type = get_request_type(msg[0])
-    
+    response = ''
+
     print(f'Route: {route}')
     if req_type=="GET":
         print("GET request!")
+        if not (route=="/" or route==index_file):
+            path = static_files+route
+            if os.path.exists(path):
+                try:
+                    #read as string
+                    with open(path) as file:
+                        response = file.read()
+                except:
+                    #read as binary if cannot read as string
+                    with open(path,'rb') as file:
+                        response = file.read()
+            #if the given route doesn't exist.
+            #simply return an empty response
+        else:
+            #return index file if route is / or /index.html
+            with open(index_file) as file:
+                response = file.read()
     elif req_type=="POST":
         print("POST request!")
-        #data comesd later in powershell
+        #data comes later in powershell
         #temp solution - check if continue is present in header
         if 'Expect: 100-continue' in msg:
             data = client_sock.recv(1024).decode().split(SPLIT)
@@ -52,5 +79,5 @@ for i in range(4):
             print(data)
         #need to serialize differently based on Content-Type
 
-    client_sock.sendall(resp().encode())
+    client_sock.sendall(resp(response))
     client_sock.close()
