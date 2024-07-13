@@ -22,20 +22,35 @@ def get_request_type(line:str) -> str:
 
 def get_route(line:str) -> str:
     req_type = get_request_type(line)
-    line = line.replace(req_type,"").replace("HTTP/1.1","").strip()
-    return line
+    route = line.replace(req_type,"").replace("HTTP/1.1","").strip()
+    return route
 
-
-client_sock, client_addr = sock.accept()
-for i in range(3):
-    msg = client_sock.recv(1024).decode().split(SPLIT)
+for i in range(4):
+    client_sock, client_addr = sock.accept()
+    #data comes here in cmd. tf
+    msg = client_sock.recv(1024).decode().split(SPLIT) #also splits json data in post
     print(f"Received request from {client_addr}")
-    print(msg)
+    #print(msg)
     route = get_route(msg[0])
     req_type = get_request_type(msg[0])
     
+    print(f'Route: {route}')
     if req_type=="GET":
         print("GET request!")
     elif req_type=="POST":
         print("POST request!")
+        #data comesd later in powershell
+        #temp solution - check if continue is present in header
+        if 'Expect: 100-continue' in msg:
+            data = client_sock.recv(1024).decode().split(SPLIT)
+            print(data)
+        else:
+            #if does not have expect, the data is bundled with the 1st request
+            #data always comes after ,''. So ,'', '' means no data (usually in get reqs)
+            divider = msg.index('') + 1 #+1 because we want the index after empty string
+            data = msg[divider:]
+            print(data)
+        #need to serialize differently based on Content-Type
+
     client_sock.sendall(resp().encode())
+    client_sock.close()
