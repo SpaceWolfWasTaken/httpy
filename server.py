@@ -22,10 +22,11 @@ class HttpyServer:
         
         for i in range(3):
             client_sock, client_addr = self.socket.accept()
-            msg = client_sock.recv(1024).decode().split(SPLIT) #also splits json data in post
+            msg = client_sock.recv(1024).decode().split(CONTENT_SPLIT)
+            headers = msg[0].split(SPLIT) #first half contains header data
             print(f"Received request from {client_addr}")
-            route = self.get_route(msg[0])
-            req_type = self.get_request_type(msg[0])
+            route = self.get_route(headers[0]) #first line is always {GET/POST,etc} /route HTTP/v
+            req_type = self.get_request_type(headers[0])
             response = ''
             if req_type=="GET":
                 print("GET request!")
@@ -54,16 +55,11 @@ class HttpyServer:
                 #temp solution - check if continue is present in header
                 data = ''
                 if 'Expect: 100-continue' in msg:
-                    data = client_sock.recv(1024).decode().split(SPLIT)
+                    data = client_sock.recv(1024).decode()
                 else:
                     #if does not have expect, the data is bundled with the 1st request
-                    #data always comes after ,''. So ,'', '' means no data (usually in get reqs)
-                    divider = msg.index('') + 1 #+1 because we want the index after empty string
-                    data = msg[divider:]
-                    #if data[0] == '{':
-                        #temp fix for broken json
-                        #data = ''.join(data)
-                    ####TEMPORARY
+                    #so data comes after headers
+                    data = msg[1]
                     data = ''.join(data) #making so that data always is a string. temporary
                     ####
                     if route in self.route_map.keys():
