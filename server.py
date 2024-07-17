@@ -1,6 +1,7 @@
 import socket as s
 import re
 import os
+import sys
 
 STATUS_200 = "HTTP/1.1 200 OK"
 SPLIT = "\r\n"
@@ -19,58 +20,66 @@ class HttpyServer:
     def run(self):
         self.socket.bind((self.host,self.port))
         self.socket.listen(self.max_listeners)
-        
-        for i in range(3):
-            client_sock, client_addr = self.socket.accept()
-            msg = client_sock.recv(1024).decode().split(CONTENT_SPLIT)
-            headers = msg[0].split(SPLIT) #first half contains header data
-            print(f"Received request from {client_addr}")
-            route = self.get_route(headers[0]) #first line is always {GET/POST,etc} /route HTTP/v
-            req_type = self.get_request_type(headers[0])
-            response = ''
-            if req_type=="GET":
-                print("GET request!")
-                path = self.static_files+route
-                if os.path.exists(path) and (not route == '/'):
-                    try:
-                        #read as string
-                        with open(path) as file:
-                            response = file.read()
-                    except:
-                        #read as binary if cannot read as string
-                        with open(path,'rb') as file:
-                            response = file.read()
-                #if the given route doesn't exist as a file.
-                #check whether it exists in the route map
-                elif route in self.route_map.keys():
+        print(f"Running on http://{self.host}:{self.port}")
+        try:
+            while True:
+                self.req_resp()
+        except Exception as e:
+            print(e)
+        finally:
+            self.socket.close()
+            sys.exit()
+
+    def req_resp(self):
+        client_sock, client_addr = self.socket.accept()
+        msg = client_sock.recv(1024).decode().split(CONTENT_SPLIT)
+        headers = msg[0].split(SPLIT) #first half contains header data
+        print(f"Received request from {client_addr}")
+        route = self.get_route(headers[0]) #first line is always {GET/POST,etc} /route HTTP/v
+        req_type = self.get_request_type(headers[0])
+        response = ''
+        if req_type=="GET":
+            print("GET request!")
+            path = self.static_files+route
+            if os.path.exists(path) and (not route == '/'):
+                try:
+                    #read as string
+                    with open(path) as file:
+                        response = file.read()
+                except:
+                    #read as binary if cannot read as string
+                    with open(path,'rb') as file:
+                        response = file.read()
+            #if the given route doesn't exist as a file.
+            #check whether it exists in the route map
+            elif route in self.route_map.keys():
+                #call the function
+                response = self.route_map[route]['GET']()
+            else:
+                #if route doesn't exist, do nothing for now
+                pass
+
+        elif req_type=="POST":
+            print("POST request!")
+            #data comes later in powershell
+            #temp solution - check if continue is present in header
+            data = ''
+            if 'Expect: 100-continue' in msg:
+                data = client_sock.recv(1024).decode()
+            else:
+                #if does not have expect, the data is bundled with the 1st request
+                #so data comes after headers
+                data = msg[1]
+                data = ''.join(data) #making so that data always is a string. temporary
+                ####
+                if route in self.route_map.keys():
                     #call the function
-                    response = self.route_map[route]['GET']()
+                    response = self.route_map[route]['POST'](data)
                 else:
                     #if route doesn't exist, do nothing for now
                     pass
-
-            elif req_type=="POST":
-                print("POST request!")
-                #data comes later in powershell
-                #temp solution - check if continue is present in header
-                data = ''
-                if 'Expect: 100-continue' in msg:
-                    data = client_sock.recv(1024).decode()
-                else:
-                    #if does not have expect, the data is bundled with the 1st request
-                    #so data comes after headers
-                    data = msg[1]
-                    data = ''.join(data) #making so that data always is a string. temporary
-                    ####
-                    if route in self.route_map.keys():
-                        #call the function
-                        response = self.route_map[route]['POST'](data)
-                    else:
-                        #if route doesn't exist, do nothing for now
-                        pass
-            client_sock.sendall(self.resp(response))
-            client_sock.close()
-
+        client_sock.sendall(self.resp(response))
+        client_sock.close()
 
     def resp(self,data:str | bytes = ""):
         if type(data) == str:
