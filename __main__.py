@@ -1,6 +1,6 @@
-from server import HttpyServer
+import server, time
 
-app = HttpyServer()
+app = server.ThreadedServer(max_listeners=2)
 
 def index():
     with open('files/index.html') as file:
@@ -12,6 +12,11 @@ def hello_world():
 def echo(data):
     return data
 
+def sleep():
+    time.sleep(5)
+    print("Slept for 5 seconds.")
+    return "Slept for 5 seconds."
+
 app.route_map = {
     '/':{
         'GET':index
@@ -21,6 +26,9 @@ app.route_map = {
     },
     '/echo':{
         'POST':echo
+    },
+    '/sleep':{
+        'GET':sleep
     }
 }
 

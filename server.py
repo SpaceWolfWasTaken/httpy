@@ -2,6 +2,7 @@ import socket as s
 import re
 import os
 import sys
+import threading
 
 STATUS_200 = "HTTP/1.1 200 OK"
 SPLIT = "\r\n"
@@ -100,3 +101,38 @@ class HttpyServer:
         req_type = self.get_request_type(line)
         route = line.replace(req_type,"").replace("HTTP/1.1","").strip()
         return route
+    
+
+class ThreadedServer(HttpyServer):
+    def __init__(self,host="127.0.0.1",port=9989,max_listeners=32,static_files="files"):
+        super().__init__(host,port,max_listeners,static_files)
+        self.thread_pool:set[threading.Thread] = set()
+
+
+    def run(self):
+        self.socket.bind((self.host,self.port))
+        self.socket.listen(self.max_listeners)
+        print(f"Running on http://{self.host}:{self.port}")
+        try:
+            dead_threads = set()
+            while True:
+                if len(self.thread_pool) < self.max_listeners:
+                    thread = threading.Thread(target=self.req_resp,daemon=True)
+                    thread.start()
+                    self.thread_pool.add(thread)
+                
+                for thread in self.thread_pool:
+                    if not thread.is_alive():
+                        dead_threads.add(thread)
+                if len(dead_threads) > 0:
+                    self.thread_pool = self.thread_pool.difference(dead_threads)
+                    dead_threads.clear()
+                
+        except Exception as e:
+            print(e)
+        finally:
+            self.socket.close()
+            sys.exit()
+
+
+        
