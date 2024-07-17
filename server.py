@@ -7,7 +7,6 @@ import threading
 STATUS_200 = "HTTP/1.1 200 OK"
 SPLIT = "\r\n"
 CONTENT_SPLIT = SPLIT + SPLIT
-ADDRESS = ("127.0.0.1",9989)
 
 class HttpyServer:
     def __init__(self,host="127.0.0.1",port=9989,max_listeners=32,static_files="files"):
@@ -22,6 +21,7 @@ class HttpyServer:
         self.socket.bind((self.host,self.port))
         self.socket.listen(self.max_listeners)
         print(f"Running on http://{self.host}:{self.port}")
+        print("Press CTRL+C to quit.")
         try:
             while True:
                 self.req_resp()
@@ -99,7 +99,7 @@ class HttpyServer:
 
     def get_route(self,line:str) -> str:
         req_type = self.get_request_type(line)
-        route = line.replace(req_type,"").replace("HTTP/1.1","").strip()
+        route = line.replace(req_type,"").split("HTTP")[0].strip()
         return route
     
 
@@ -113,7 +113,8 @@ class ThreadedServer(HttpyServer):
         self.socket.bind((self.host,self.port))
         self.socket.listen(self.max_listeners)
         print(f"Running on http://{self.host}:{self.port}")
-        try:
+        print("Press CTRL+C to quit.")
+        try:    
             dead_threads = set()
             while True:
                 if len(self.thread_pool) < self.max_listeners:
