@@ -1,3 +1,4 @@
+'''
 import server, time
 
 app = server.ThreadedServer(max_listeners=2)
@@ -32,4 +33,8 @@ app.route_map = {
     }
 }
 
+app.run()
+'''
+import websocket
+app = websocket.WebSocket()
 app.run()
