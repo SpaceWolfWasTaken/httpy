@@ -19,9 +19,14 @@ class WebSocket:
         try:    
             client_sock, client_addr = self.socket.accept()
             if self.handshake(client_sock):
-                data = client_sock.recv(1024)
-                self.breakdown(data)
-                client_sock.send('Hi'.encode())
+                while True:
+                    data = client_sock.recv(1024)
+                    self.breakdown(data)
+                    data = self.send_data('Hi')
+                    if not data:
+                        pass
+                    else:
+                        client_sock.send(data)
             else:
                 #if first msg is not about ws upgrade
                 client_sock.close()
@@ -68,6 +73,7 @@ class WebSocket:
         opcode = 0b00_001_111 & first_byte #basically removes the first 4 bits
 
         second_byte = data[1] & 0b01_111_111 #leaving out bit 0 since we need from byte 9-15 / 1-7
+        #bit 0 is mask bit. we know its 1 from client->server data 
         payload_length = 0
         mask = []
         payload = []
@@ -121,3 +127,27 @@ class WebSocket:
             return 1
         else:
             return 0
+    
+    def send_data(self, data:str | bytes):
+        to_send = []
+        payload = data
+        first_byte = 0b10_000_001 #FIN is set to 1.
+        if type(data) == str:
+            first_byte = first_byte | 0b1  #Opcode is set to 0x1 = 0b1
+            payload = payload.encode()
+        else:
+            first_byte = first_byte | 0b10  #Opcode is set to 0x2 = 0b10
+        to_send.append(first_byte)
+
+        payload_length = len(data)
+        
+        if payload_length <= 125:
+            to_send.append(payload_length)
+            to_send.extend(payload)
+            return bytes(to_send)
+
+        else:
+            print("Server isn't configured for payloads above 125.")
+            return False
+
+
