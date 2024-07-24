@@ -22,11 +22,6 @@ class WebSocket:
                 while True:
                     data = client_sock.recv(1024)
                     self.breakdown(data)
-                    data = self.send_data('Hi')
-                    if not data:
-                        pass
-                    else:
-                        client_sock.send(data)
             else:
                 #if first msg is not about ws upgrade
                 client_sock.close()
@@ -73,6 +68,7 @@ class WebSocket:
         opcode = 0b00_001_111 & first_byte #basically removes the first 4 bits
 
         second_byte = data[1] & 0b01_111_111 #leaving out bit 0 since we need from byte 9-15 / 1-7
+        masked = self.get_bit(data[1], 0)
         #bit 0 is mask bit. we know its 1 from client->server data 
         payload_length = 0
         mask = []
@@ -80,13 +76,13 @@ class WebSocket:
         match second_byte:
             case 127:
                 val = data[2]
-                for i in range(3,6):
+                for i in range(3,10):
                     #basically - left shift till 8 bits are available, then add byte
                     val = val << 8 
                     val += data[i]
                 payload_length = val
-                mask = data[6:10]
-                payload = data[10:]
+                mask = data[10:14]
+                payload = data[14:]
             case 126:
                 val = data[2]
                 val = val << 8
@@ -105,6 +101,8 @@ class WebSocket:
         print(f'RSV2: {rsv2}')
         print(f'RSV3: {rsv3}')
         print(f'OPCODE: {hex(opcode)}')
+        print(f'Second Byte: {second_byte}')
+        print(f'Masked: {masked}')
         print(f'Payload Length: {payload_length}')
         print(self.unmask(mask,payload).decode())
         
@@ -131,23 +129,33 @@ class WebSocket:
     def send_data(self, data:str | bytes):
         to_send = []
         payload = data
-        first_byte = 0b10_000_001 #FIN is set to 1.
+        first_byte = 0b10_000_000 #FIN is set to 1.
         if type(data) == str:
             first_byte = first_byte | 0b1  #Opcode is set to 0x1 = 0b1
             payload = payload.encode()
         else:
             first_byte = first_byte | 0b10  #Opcode is set to 0x2 = 0b10
+
         to_send.append(first_byte)
 
         payload_length = len(data)
+        print(f"Sending data of length: {payload_length}")
         
         if payload_length <= 125:
             to_send.append(payload_length)
-            to_send.extend(payload)
-            return bytes(to_send)
+
+        elif payload_length <=65535:
+            to_send.append(126)
+            payload_length = payload_length.to_bytes(2,'big')
+            to_send.extend(payload_length)
 
         else:
-            print("Server isn't configured for payloads above 125.")
-            return False
+            to_send.append(127)
+            payload_length = payload_length.to_bytes(8,'big')
+            to_send.extend(payload_length)
+        
+        to_send.extend(payload)
+
+        return bytes(to_send)
 
 
