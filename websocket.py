@@ -4,12 +4,13 @@ import hashlib
 import sys
 
 class WebSocket:
-    def __init__(self, host="127.0.0.1",port=9989,max_listeners=32):
+    def __init__(self, host="127.0.0.1",port=9989,max_listeners=32, buffer=1024):
         self.socket = s.socket()
         self.host = host
         self.port = port
         self.max_listeners = max_listeners
         self.clients = dict()
+        self.buffer = buffer
         
     def run(self):
         self.socket.bind((self.host,self.port))
@@ -20,8 +21,22 @@ class WebSocket:
             client_sock, client_addr = self.socket.accept()
             if self.handshake(client_sock):
                 while True:
-                    data = client_sock.recv(1024)
-                    self.breakdown(data)
+                    data = client_sock.recv(self.buffer)
+                    frame = Frame(data[0])
+                    if frame.opcode == 8:
+                        print('Connection closing...')
+                        client_sock.close()
+                        sys.exit()
+                    payload = Payload(data,frame.opcode)
+                    frame.display()
+                    for _ in range(int(payload.payload_length / self.buffer)):
+                        data = client_sock.recv(self.buffer)
+                        payload.payload.extend(data)
+                    content = payload.unmask()
+                    print(content.decode())
+                    
+                    
+                    
             else:
                 #if first msg is not about ws upgrade
                 client_sock.close()
@@ -58,73 +73,6 @@ class WebSocket:
         key = str(key) #done to force the hash value to act as string
         key = key[2:-1] #removes b' and '.
         return key
-
-    def breakdown(self,data:bytes):
-        first_byte = data[0]
-        fin = self.get_bit(first_byte,0)
-        rsv1 = self.get_bit(first_byte,1)
-        rsv2 = self.get_bit(first_byte,2)
-        rsv3 = self.get_bit(first_byte,3)
-        opcode = 0b00_001_111 & first_byte #basically removes the first 4 bits
-
-        second_byte = data[1] & 0b01_111_111 #leaving out bit 0 since we need from byte 9-15 / 1-7
-        masked = self.get_bit(data[1], 0)
-        #bit 0 is mask bit. we know its 1 from client->server data 
-        payload_length = 0
-        mask = []
-        payload = []
-        match second_byte:
-            case 127:
-                val = data[2]
-                for i in range(3,10):
-                    #basically - left shift till 8 bits are available, then add byte
-                    val = val << 8 
-                    val += data[i]
-                payload_length = val
-                mask = data[10:14]
-                payload = data[14:]
-            case 126:
-                val = data[2]
-                val = val << 8
-                val += data[3]
-                payload_length = val
-                mask = data[4:8]
-                payload = data[8:]
-            case _:
-                #for cases below 127
-                #the byte contains payload length
-                payload_length = second_byte
-                mask = data[2:6]
-                payload = data[6:]
-        print(f'FIN: {fin}')
-        print(f'RSV1: {rsv1}')
-        print(f'RSV2: {rsv2}')
-        print(f'RSV3: {rsv3}')
-        print(f'OPCODE: {hex(opcode)}')
-        print(f'Second Byte: {second_byte}')
-        print(f'Masked: {masked}')
-        print(f'Payload Length: {payload_length}')
-        print(self.unmask(mask,payload).decode())
-        
-    def unmask(self, mask:bytes, payload:bytes) -> bytes:
-        unmasked_vals = []
-
-        for i,val in enumerate(payload):
-            unmasked_vals.append(val ^ mask[i % 4])
-        return bytes(unmasked_vals)
-
-
-    def get_bit(self, data:int, pos:int) -> int:
-        '''
-        if data & a = a,
-        bit is 1,
-        else bit is 0
-        '''
-        mask = 0b1 << (7-pos) #1st pos is 7-0 = 0b10_000_000 #2nd pos is 7-1 = 0b1_000_000
-        if (data & mask): #if bit is set
-            return 1
-        else:
-            return 0
     
     def send_data(self, data:str | bytes):
         to_send = []
@@ -159,3 +107,91 @@ class WebSocket:
         return bytes(to_send)
 
 
+class Frame:
+    def __init__(self, first_byte):
+        self.fin = 0
+        self.rsv1 = 0
+        self.rsv2 = 0
+        self.rsv3 = 0
+        self.opcode = 0
+        self.load(first_byte)
+
+    def load(self,byte:int):
+        self.fin = self.get_bit(byte,0)
+        self.rsv1 = self.get_bit(byte,1)
+        self.rsv2 = self.get_bit(byte,2)
+        self.rsv3 = self.get_bit(byte,3)
+        self.opcode = 0b00_001_111 & byte
+
+    def get_bit(self, data:int, pos:int) -> int:
+        '''
+        if data & a = a,
+        bit is 1,
+        else bit is 0
+        '''
+        mask = 0b1 << (7-pos) #1st pos is 7-0 = 0b10_000_000 #2nd pos is 7-1 = 0b1_000_000
+        if (data & mask): #if bit is set
+            return 1
+        else:
+            return 0
+        
+    def display(self):
+        print(f'FIN: {self.fin}')
+        print(f'RSV1: {self.rsv1}')
+        print(f'RSV2: {self.rsv2}')
+        print(f'RSV3: {self.rsv3}')
+        print(f'OPCODE: {hex(self.opcode)}')
+
+        
+class Payload:
+    def __init__(self, data:bytes, opcode:int):
+        self.payload_length = 0
+        self.mask = []
+        self.payload = []
+        self.is_masked = True
+        self.opcode = opcode
+        self.first_frame_unload(data)
+
+    def first_frame_unload(self, data):
+        second_byte = data[1] & 0b01_111_111 #leaving out bit 0 since we need from byte 9-15 / 1-7
+        #bit 0 is mask bit. we know its 1 from client->server data 
+        payload = []
+        match second_byte:
+            case 127:
+                val = data[2]
+                for i in range(3,10):
+                    #basically - left shift till 8 bits are available, then add byte
+                    val = val << 8 
+                    val += data[i]
+                self.payload_length = val
+                self.mask = data[10:14]
+                payload = data[14:]
+                print('case 127')
+            case 126:
+                val = data[2]
+                val = val << 8
+                val += data[3]
+                self.payload_length = val
+                self.mask = data[4:8]
+                payload = data[8:]
+                print('case 126')
+            case _:
+                #for cases below 127
+                #the byte contains payload length
+                self.payload_length = second_byte
+                self.mask = data[2:6]
+                payload = data[6:]
+                print('case <=125')
+        self.payload.extend(payload)
+
+    def add(self, data):
+        self.payload.extend(data)
+
+    def unmask(self):
+        if self.is_masked:
+            unmasked_vals = []
+            for i,val in enumerate(self.payload):
+                unmasked_vals.append(val ^ self.mask[i % 4])
+            return bytes(unmasked_vals)
+
+    

@@ -36,5 +36,5 @@ app.route_map = {
 app.run()
 '''
 import websocket
-app = websocket.WebSocket()
+app = websocket.WebSocket(buffer=4096)
 app.run()
