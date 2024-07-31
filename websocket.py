@@ -2,6 +2,7 @@ import socket as s
 import base64
 import hashlib
 import sys
+import threading
 
 class WebSocket:
     def __init__(self, host="127.0.0.1",port=9989,max_listeners=32, buffer=1024):
@@ -106,6 +107,74 @@ class WebSocket:
 
         return bytes(to_send)
 
+class ThreadedWebSocket(WebSocket):
+    def __init__(self, host="127.0.0.1", port=9989, max_listeners=32, buffer=1024):
+        super().__init__(host, port, max_listeners, buffer)
+        self.thread_pool:set[threading.Thread] = set()
+        self.dead_threads:set[threading.Thread] = set()
+        self.text_callback = ''
+        self.binary_callback = ''
+        self.lock = threading.Lock()
+
+    def run(self):
+        self.socket.bind((self.host,self.port))
+        self.socket.listen(self.max_listeners)
+        print(f"Running on ws://{self.host}:{self.port}")
+        print("Press CTRL+C to quit.")
+        threading.Thread(target=self.check_threads,daemon=True).start()
+        try:
+            while True:
+                if len(self.thread_pool) < self.max_listeners:    
+                    client_sock, client_addr = self.socket.accept()
+                    if self.handshake(client_sock):
+                        thread = threading.Thread(target=self.recv,args=(client_sock,),daemon=True)
+                        thread.start()
+                        with self.lock:
+                            self.thread_pool.add(thread)
+                        print("Client connected.")
+                    else:
+                        #if first msg is not about ws upgrade
+                        client_sock.close()
+                    
+        except Exception as e:
+            print(e)
+        finally:
+            self.socket.close()
+            sys.exit()
+
+    def recv(self, client_sock:s.socket):
+        while True:
+            try:
+                data = client_sock.recv(self.buffer)
+                frame = Frame(data[0])
+                if frame.opcode == 8:
+                    print('Connection closing...')
+                    client_sock.close()
+                    sys.exit()
+                payload = Payload(data,frame.opcode)
+                frame.display()
+                for _ in range(int(payload.payload_length / self.buffer)):
+                    data = client_sock.recv(self.buffer)
+                    payload.payload.extend(data)
+                content = payload.unmask()
+                if frame.opcode == 0b1: #if text
+                    self.text_callback(content.decode())
+                elif frame.opcode == 0b10: #if binary
+                    self.binary_callback(content)
+            except Exception as e:
+                print(e)
+                client_sock.close()
+
+    def check_threads(self):
+        while True:
+            with self.lock:
+                for thread in self.thread_pool:
+                    if not thread.is_alive():
+                        self.dead_threads.add(thread)
+                if len(self.dead_threads) > 0:
+                    self.thread_pool = self.thread_pool.difference(self.dead_threads)
+                    self.dead_threads.clear()
+                    print("Removed dead threads...")
 
 class Frame:
     def __init__(self, first_byte):
@@ -194,4 +263,3 @@ class Payload:
                 unmasked_vals.append(val ^ self.mask[i % 4])
             return bytes(unmasked_vals)
 
-    

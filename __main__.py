@@ -36,5 +36,15 @@ app.route_map = {
 app.run()
 '''
 import websocket
-app = websocket.WebSocket(buffer=4096)
+app = websocket.ThreadedWebSocket(buffer=4096,max_listeners=2)
+
+def text(content):
+    print("Text received: ")
+    print(content)
+
+def binary(content):
+    print("Binary received.")
+
+app.text_callback = text
+app.binary_callback = binary
 app.run()
