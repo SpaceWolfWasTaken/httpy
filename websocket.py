@@ -80,10 +80,10 @@ class WebSocket:
         payload = data
         first_byte = 0b10_000_000 #FIN is set to 1.
         if type(data) == str:
-            first_byte = first_byte | 0b1  #Opcode is set to 0x1 = 0b1
+            first_byte = first_byte | OPCODE.TEXT_FRAME  #Opcode is set to 0x1 = 0b1 = Text Frame
             payload = payload.encode()
         else:
-            first_byte = first_byte | 0b10  #Opcode is set to 0x2 = 0b10
+            first_byte = first_byte | OPCODE.BINARY_FRAME  #Opcode is set to 0x2 = 0b10 = Binary Frame
 
         to_send.append(first_byte)
 
@@ -115,6 +115,7 @@ class ThreadedWebSocket(WebSocket):
         self.text_callback = ''
         self.binary_callback = ''
         self.lock = threading.Lock()
+        self.timeout = 30
 
     def run(self):
         self.socket.bind((self.host,self.port))
@@ -143,27 +144,36 @@ class ThreadedWebSocket(WebSocket):
             sys.exit()
 
     def recv(self, client_sock:s.socket):
+        client_sock.settimeout(self.timeout)
         while True:
             try:
                 data = client_sock.recv(self.buffer)
                 frame = Frame(data[0])
-                if frame.opcode == 8:
+                if frame.opcode == OPCODE.CLOSE_CONNECTION:
                     print('Connection closing...')
+                    frame.display()
                     client_sock.close()
-                    sys.exit()
+                    #sys.exit()
+                    return
                 payload = Payload(data,frame.opcode)
                 frame.display()
                 for _ in range(int(payload.payload_length / self.buffer)):
                     data = client_sock.recv(self.buffer)
                     payload.payload.extend(data)
                 content = payload.unmask()
-                if frame.opcode == 0b1: #if text
+                if frame.opcode == OPCODE.TEXT_FRAME: #if text
                     self.text_callback(content.decode())
-                elif frame.opcode == 0b10: #if binary
+                elif frame.opcode == OPCODE.BINARY_FRAME: #if binary
                     self.binary_callback(content)
+            except TimeoutError as te:
+                print(f"A client has timedout.")
+                client_sock.close()
+                return
             except Exception as e:
                 print(e)
                 client_sock.close()
+                return
+    
 
     def check_threads(self):
         while True:
@@ -235,7 +245,6 @@ class Payload:
                 self.payload_length = val
                 self.mask = data[10:14]
                 payload = data[14:]
-                print('case 127')
             case 126:
                 val = data[2]
                 val = val << 8
@@ -243,14 +252,12 @@ class Payload:
                 self.payload_length = val
                 self.mask = data[4:8]
                 payload = data[8:]
-                print('case 126')
             case _:
                 #for cases below 127
                 #the byte contains payload length
                 self.payload_length = second_byte
                 self.mask = data[2:6]
                 payload = data[6:]
-                print('case <=125')
         self.payload.extend(payload)
 
     def add(self, data):
@@ -263,3 +270,10 @@ class Payload:
                 unmasked_vals.append(val ^ self.mask[i % 4])
             return bytes(unmasked_vals)
 
+class OPCODE:
+    CONTINUATION_FRAME = 0x0
+    TEXT_FRAME = 0x1
+    BINARY_FRAME = 0x2
+    CLOSE_CONNECTION = 0x8
+    PING = 0x9
+    PONG = 0xA
